@@ -1,40 +1,44 @@
-# RTO/RPO Evidence — Lab 23 (TEMPLATE — sinh viên điền bằng SỐ CỦA MÌNH)
+# RTO/RPO Evidence — Lab 23
 
-Quy tắc duy nhất: mỗi con số ở đây phải trỏ được về **một dòng log thật**
-(`đường/dẫn.jsonl:số_dòng`). `pytest tests/test_rto_evidence.py` sẽ mở từng file ra kiểm tra.
-Con số không có evidence = trượt, bất kể các phần khác.
+Tất cả số liệu dưới đây lấy từ drill của repo này. RTO được tính từ các timestamp loadgen; không lấy thời lượng ước đoán.
 
-## 1. Drill 1 — không có DR (baseline)
+## 1. Drill 1 — Không có DR
 
-| Chỉ số | Giá trị | Cách đo | Evidence |
-|---|---|---|---|
-| t_outage | `<iso>` | chaos kill | `chaos/chaos-events.jsonl:1` |
-| Request fail đầu tiên | `+__s` | dòng `ok:false` đầu tiên sau t_outage | `reports/drill-1-nodr.jsonl:__` |
-| Request thành công sau đó | không có | không có dòng `ok:true` nào sau t_outage | `reports/measure-drill-1.json` |
-| RTO | `NO_RECOVERY` | `tools/measure_rto.py` | `reports/measure-drill-1.json` |
+| Chỉ số | Kết quả | Cách đo | Evidence |
+|---|---:|---|---|
+| t_outage | 2026-10-09T04:30:17Z | Chaos kill Region A | `chaos/chaos-events.jsonl:1` |
+| Request lỗi đầu tiên | +0.3s | Request `ok:false` đầu tiên sau outage | `reports/drill-1-nodr.jsonl:18` |
+| Request thành công sau outage | Không có | Không có request `ok:true` nào sau outage | `reports/measure-drill-1.json:25` |
+| RTO | NO_RECOVERY | Đo từ loadgen và chaos log | `reports/measure-drill-1.json:25` |
+| Lưu lượng | 32 request, 15 lỗi | Đếm request và kết quả measure | `reports/drill-1-nodr.jsonl:32`, `reports/measure-drill-1.json:28` |
 
-## 2. Drill 2 — có DR
+## 2. Drill 2 — Có DR
 
-| Mốc | +giây từ t_outage | Cách đo | Evidence |
-|---|---|---|---|
-| t_outage (mốc 0) | 0 | `action:kill` | `chaos/chaos-events.jsonl:__` |
-| User thấy lỗi đầu tiên | | dòng `ok:false` đầu | `reports/drill-2-withdr.jsonl:__` |
-| Health check phát hiện | | `to:UNHEALTHY, region:a` | `reports/health-events.jsonl:__` |
-| Snapshot restore xong | | `step:2_restore_snapshot` | `reports/failover-events.jsonl:__` |
-| Region phụ ready | | `step:4_wait_ready` | `reports/failover-events.jsonl:__` |
-| DNS cutover | | `step:5_dns_cutover` | `reports/failover-events.jsonl:__` |
-| **RTO đo được** | | dòng `ok:true` đầu sau lỗi | `reports/drill-2-withdr.jsonl:__` |
+| Mốc | Giây từ t_outage | Evidence |
+|---|---:|---|
+| t_outage (mốc 0) | 0.0s | `chaos/chaos-events.jsonl:5` |
+| Người dùng thấy lỗi đầu tiên | +0.1s | `reports/drill-2-withdr.jsonl:26` |
+| Health checker phát hiện A unhealthy | +14.1s | `reports/health-events.jsonl:5` |
+| Restore snapshot hoàn tất | +14.5s | `reports/failover-events.jsonl:23` |
+| Region B ready | +20.6s | `reports/failover-events.jsonl:25` |
+| DNS cutover sang B | +20.6s | `reports/failover-events.jsonl:26` |
+| Request thành công đầu tiên từ B; RTO | +22.7s | `reports/drill-2-withdr.jsonl:37` |
 
-| Chỉ số | Đo được | Mục tiêu (slide §1) | Verdict |
-|---|---|---|---|
-| RTO — Inference API | `__s` | 300s (5 phút) | |
-| RPO — Vector DB | `__s` / `__` doc | 300s (5 phút) | |
+| Chỉ số | Đo được | Mục tiêu | Kết quả |
+|---|---:|---:|---|
+| RTO — Inference API | 22.7s | ≤300s | PASS |
+| RPO — Vector DB | 28.0s / 14 tài liệu mất | ≤300s | PASS |
 
-## 3. RTO của tôi gồm những gì (bắt buộc — đây là phần chấm điểm hiểu bài)
+## 3. RTO breakdown
 
-| Thành phần | Giây | Nó đến từ đâu | Giảm được bằng cách nào |
-|---|---|---|---|
-| Health-check detect floor | | `interval_s × threshold` trong `reports/health-events.jsonl:__` | |
-| Snapshot restore | | 2_restore → 3_scale | |
-| GPU pool warm-up | | `waited_s` ở `4_wait_ready` | |
-| DNS/LB TTL cache | | t_recovered − t_cutover | |
+Các khoảng thời gian được chia tại các milestone tương ứng; các thành phần cộng lại thành RTO đã làm tròn 22.7s.
+
+| Thành phần | Giây | Nguồn tính | Evidence |
+|---|---:|---|---|
+| Health-check detection | 14.13s (floor cấu hình 15s) | t_detect − t_outage; interval 5s × threshold 3 | `reports/health-events.jsonl:5` |
+| Snapshot restore | 0.36s | Event restore − t_detect | `reports/failover-events.jsonl:23`, `reports/health-events.jsonl:5` |
+| GPU pool warm-up | 6.13s | Region B ready − event restore; warm-up quan sát 6.11s | `reports/failover-events.jsonl:23`, `reports/failover-events.jsonl:25` |
+| DNS/LB TTL cache | 2.05s | Request phục hồi đầu tiên − DNS cutover | `reports/failover-events.jsonl:26`, `reports/drill-2-withdr.jsonl:37` |
+| **Tổng** | **22.67s ≈ 22.7s** | So với RTO tính từ timestamp loadgen | `reports/drill-2-withdr.jsonl:37` |
+
+RPO đo khi restore là 28.0 giây và 14 document không có trong replica; model version được ghi nhận là `embed-model=vi-e5-base@v3` tại `reports/failover-events.jsonl:23`.

@@ -27,5 +27,8 @@ __pycache__/
 .venv/
 venv/
 
+
+.venv-wsl/
+venv-wsl/
 # OS
 .DS_Store
